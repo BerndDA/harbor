@@ -43,7 +43,7 @@ def validate(conf: dict, **kwargs):
         raise Exception("Protocol in external log endpoint must be one of 'udp' or 'tcp' ")
 
     # Storage validate
-    valid_storage_drivers = ["filesystem", "azure", "gcs", "s3", "swift", "oss"]
+    valid_storage_drivers = ["filesystem", "azure", "gcs", "s3"]
     storage_provider_name = conf.get("storage_provider_name")
     if storage_provider_name not in valid_storage_drivers:
         raise Exception("Error: storage driver %s is not supported, only the following ones are supported: %s" % (

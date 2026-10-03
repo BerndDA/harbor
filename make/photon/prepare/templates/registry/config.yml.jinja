@@ -28,12 +28,12 @@ storage:
     disable: true
 {% endif %}
 redis:
+  addrs:
+{% for host in redis_host.split(',') %}
+    - "{{host}}"
+{% endfor %}
 {% if sentinel_master_set %}
-  # sentinel hosts with comma
-  addr: {{redis_host}}
-  sentinelMasterSet: {{sentinel_master_set}}
-{% else %}
-  addr: {{redis_host}}
+  mastername: {{sentinel_master_set}}
 {% endif %}
   readtimeout: 10s
   writetimeout: 10s
@@ -41,11 +41,15 @@ redis:
   password: {{redis_password}}
   username: {{redis_username}}
   db: {{redis_db_index_reg}}
-  enableTLS: {{redis_enableTLS}}
-  pool:
-    maxidle: 100
-    maxactive: 500
-    idletimeout: 60s
+{% if redis_enableTLS == 'true' %}
+  # distribution v3 enables TLS only when tls.* is set; trust the system CA bundle
+  tls:
+    rootcas:
+      - /etc/pki/tls/certs/ca-bundle.crt
+{% endif %}
+  poolsize: 500
+  maxidleconns: 100
+  connmaxidletime: 60s
 http:
 {% if internal_tls.enabled %}
   addr: :5443
@@ -72,6 +76,3 @@ auth:
     path: /etc/registry/passwd
 validation:
   disabled: true
-compatibility:
-  schema1:
-    enabled: true
