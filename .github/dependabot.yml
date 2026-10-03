@@ -15,13 +15,9 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
     labels:
       - "release-note/infra"
-    assignees:
-      - "OrlinVasilev"
-    reviewers:
-      - "OrlinVasilev"
     groups:
       # codeql-analysis.yml runs codeql-action/init and codeql-action/analyze
       # in one job. init writes a config file stamped with its version and
