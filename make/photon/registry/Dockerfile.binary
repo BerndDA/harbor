@@ -1,11 +1,10 @@
 ARG golang_image
 FROM ${golang_image}
 
-ENV DISTRIBUTION_DIR /go/src/github.com/docker/distribution
-ENV BUILDTAGS include_oss include_gcs
-ENV GO111MODULE auto
+WORKDIR /src
+COPY . /src
 
-WORKDIR $DISTRIBUTION_DIR
-COPY . $DISTRIBUTION_DIR
-
-RUN CGO_ENABLED=0 make PREFIX=/go clean binaries
+# distribution v3 is a Go module with vendored deps; oss/swift drivers no longer exist
+RUN CGO_ENABLED=0 GOFLAGS=-mod=vendor go build -trimpath \
+    -ldflags "-s -w -X github.com/distribution/distribution/v3/version.version=$(git describe --match 'v[0-9]*' --always 2>/dev/null || echo unknown)" \
+    -o /out/registry ./cmd/registry
