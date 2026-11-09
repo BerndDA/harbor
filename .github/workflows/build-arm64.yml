@@ -1,8 +1,11 @@
 name: Build Harbor arm64 images
 
-# Builds all Harbor service images natively on a GitHub-hosted arm64 runner
-# (free for public repositories), pushes them to ghcr.io/<owner>/<image>,
-# and uploads the offline installer as a workflow artifact.
+# Builds Harbor images natively on a GitHub-hosted arm64 runner (free for public
+# repositories) and pushes them to ghcr.io/<owner>/<image>.
+#   images=registry (default, also on push): only registry-photon and harbor-registryctl,
+#     the two images that carry our changes (distribution v3, web identity for S3).
+#     All other images come from the official multi-arch goharbor/* release.
+#   images=all: every service image plus the offline installer (workflow artifact).
 
 on:
   workflow_dispatch:
@@ -11,6 +14,11 @@ on:
         description: "Push images to ghcr.io"
         type: boolean
         default: true
+      images:
+        description: "Images to build"
+        type: choice
+        options: [registry, all]
+        default: registry
   push:
     branches: [main]
     tags: ["v*"]
@@ -31,6 +39,10 @@ jobs:
     env:
       ARCH: arm64
       BUILD_PACKAGE: "true"
+      # push events have no inputs: build only the registry images
+      IMAGES: ${{ inputs.images || 'registry' }}
+      # same Trivy version as TRIVYVERSION in the Makefile; "latest" needs a GitHub API lookup that can fail
+      TRIVY_CLI_VERSION: v0.76.1
     steps:
       - name: Free disk space
         run: |
@@ -63,7 +75,22 @@ jobs:
       - name: Build local photon base (arm64)
         run: docker build -f make/photon/common/Dockerfile -t goharbor/photon:5.0 .
 
+      - name: Build registry images
+        if: env.IMAGES == 'registry'
+        run: |
+          set -x
+          sudo -E make versions_prepare compile_registryctl build \
+            ARCH=arm64 \
+            GOBUILDTAGS="include_oss include_gcs" \
+            BASEIMAGETAG=dev \
+            BUILD_BASE=true PULL_BASE_FROM_DOCKERHUB=false PUSHBASEIMAGE=false \
+            BUILDTARGET="_build_registry _build_registryctl" \
+            VERSIONTAG=${{ steps.meta.outputs.tag }} \
+            HTTPPROXY=
+          docker images | grep goharbor
+
       - name: Build images and offline installer
+        if: env.IMAGES == 'all'
         run: |
           set -x
           sudo -E make package_offline \
@@ -86,19 +113,6 @@ jobs:
             [ "$arch" = "arm64" ] || { echo "ERROR: $img is $arch"; exit 1; }
           done
 
-      - name: Scan images with Trivy
-        # Report only: findings are listed in the job summary and do not fail the build.
-        uses: aquasecurity/setup-trivy@v0.3.1
-
-      - name: Run Trivy on built images
-        run: |
-          tag=${{ steps.meta.outputs.tag }}
-          echo "## Trivy (HIGH/CRITICAL, fixed only)" >> "$GITHUB_STEP_SUMMARY"
-          for img in $(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^goharbor/' | grep -- ":${tag}$"); do
-            echo "### ${img}" >> "$GITHUB_STEP_SUMMARY"
-            trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format table "$img" >> "$GITHUB_STEP_SUMMARY" || true
-          done
-
       - name: Log in to ghcr.io
         if: github.event_name != 'workflow_dispatch' || inputs.push_images
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -119,7 +133,26 @@ jobs:
             echo "- ghcr.io/${owner}/${name}:${tag}" >> "$GITHUB_STEP_SUMMARY"
           done
 
+      - name: Scan images with Trivy
+        # Report only: findings are listed in the job summary and do not fail the build.
+        # Runs after the push, so a scanner problem never blocks the images.
+        continue-on-error: true
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: ${{ env.TRIVY_CLI_VERSION }}
+
+      - name: Run Trivy on built images
+        continue-on-error: true
+        run: |
+          tag=${{ steps.meta.outputs.tag }}
+          echo "## Trivy (HIGH/CRITICAL, fixed only)" >> "$GITHUB_STEP_SUMMARY"
+          for img in $(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^goharbor/' | grep -- ":${tag}$"); do
+            echo "### ${img}" >> "$GITHUB_STEP_SUMMARY"
+            trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format table "$img" >> "$GITHUB_STEP_SUMMARY" || true
+          done
+
       - name: Upload offline installer
+        if: env.IMAGES == 'all'
         uses: actions/upload-artifact@v4
         with:
           name: harbor-offline-installer-${{ steps.meta.outputs.tag }}-arm64
